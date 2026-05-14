@@ -3,9 +3,12 @@
 #include <string>
 #include <sstream>
 #include <iomanip>
-#include <windows.h>
 #include <limits>
 #include <cctype>
+/* GREEN */
+#include <vector>
+#include <algorithm>
+#include <cstdlib>
 
 using namespace std;
 
@@ -15,6 +18,13 @@ using namespace std;
 #endif
 #ifdef min
 #undef min
+#endif
+
+/* GREEN */
+// Заглушки для Windows-специфичных функций (для кроссплатформенности)
+#ifndef _WIN32
+#define SetConsoleOutputCP(x)
+#define SetConsoleCP(x)
 #endif
 
 
@@ -51,6 +61,13 @@ struct IndexByTitle {
     unsigned int recNum;   // Номер записи в основном массиве
 };
 
+/* GREEN */
+// Индекс для сортировки по Составному ключу (Автор + Название)
+struct IndexByComposite {
+    string key;            // Конкатенация: author + " | " + title
+    unsigned int recNum;   // Номер записи в основном массиве
+};
+
 
 // Константы и Глобальные переменные (для упрощения передачи в функции)
     
@@ -58,6 +75,8 @@ const unsigned int MAX_BOOKS = 100;
 Book library[MAX_BOOKS];             // Основной массив записей
 IndexByInvNum idxInv[MAX_BOOKS];     // Массив-индекс по инв. номеру
 IndexByTitle idxTitle[MAX_BOOKS];    // Массив-индекс по названию
+/* GREEN */
+IndexByComposite idxComposite[MAX_BOOKS]; // Массив-индекс по составному ключу
 unsigned int bookCount = 0;          // Текущее количество книг
 
 
@@ -348,6 +367,29 @@ void saveToFile(const string& filename) {
 
 // 5. СОРТИРОВКА ИНДЕКСОВ
 
+/* GREEN */
+// Факультативно: Функции сравнения для qsort
+int compareInvNum(const void* a, const void* b) {
+    const IndexByInvNum* ia = (const IndexByInvNum*)a;
+    const IndexByInvNum* ib = (const IndexByInvNum*)b;
+    if (ia->key < ib->key) return -1;
+    if (ia->key > ib->key) return 1;
+    return 0;
+}
+
+int compareTitleAsc(const void* a, const void* b) {
+    const IndexByTitle* ia = (const IndexByTitle*)a;
+    const IndexByTitle* ib = (const IndexByTitle*)b;
+    return ia->key.compare(ib->key);
+}
+
+int compareCompositeDesc(const void* a, const void* b) {
+    const IndexByComposite* ia = (const IndexByComposite*)a;
+    const IndexByComposite* ib = (const IndexByComposite*)b;
+    // Обратный порядок (убывание)
+    return ib->key.compare(ia->key);
+}
+
 // 5.1 Итерационная сортировка: Вставками (Insertion Sort) для Инв. Номера
 void sortIndexInvNum() {
     // Сортируем массив idxInv по полю key (invNumber)
@@ -360,6 +402,12 @@ void sortIndexInvNum() {
         }
         idxInv[j + 1] = temp;
     }
+}
+
+/* GREEN */
+// Сортировка через qsort для сравнения результатов (факультативно)
+void sortIndexInvNumQsort() {
+    qsort(idxInv, bookCount, sizeof(IndexByInvNum), compareInvNum);
 }
 
 // Рекурсивная сортировка: QuickSort для Названия
@@ -393,6 +441,43 @@ void sortIndexTitle() {
     }
 }
 
+/* GREEN */
+// Сортировка через qsort для сравнения результатов (факультативно)
+void sortIndexTitleQsort() {
+    qsort(idxTitle, bookCount, sizeof(IndexByTitle), compareTitleAsc);
+}
+
+/* GREEN */
+// Сортировка по составному ключу (Автор + Название) - рекурсивная быстрая сортировка (по убыванию)
+int partitionComposite(int low, int high) {
+    string pivot = idxComposite[high].key;
+    int i = (low - 1);
+
+    for (int j = low; j <= high - 1; j++) {
+        // Сортировка в ОБРАТНОМ порядке (убывание) по сравнению с первым ключом
+        if (idxComposite[j].key > pivot) {
+            i++;
+            swap(idxComposite[i], idxComposite[j]);
+        }
+    }
+    swap(idxComposite[i + 1], idxComposite[high]);
+    return (i + 1);
+}
+
+void quickSortComposite(int low, int high) {
+    if (low < high) {
+        int pi = partitionComposite(low, high);
+        quickSortComposite(low, pi - 1);
+        quickSortComposite(pi + 1, high);
+    }
+}
+
+void sortIndexComposite() {
+    if (bookCount > 0) {
+        quickSortComposite(0, bookCount - 1);
+    }
+}
+
 // Общая функция пересчета индексов (вызывается после любого изменения данных)
 void rebuildIndices() {
     // Сначала просто копируем текущие ссылки
@@ -402,10 +487,17 @@ void rebuildIndices() {
 
         idxTitle[i].key = library[i].title;
         idxTitle[i].recNum = i;
+        
+        /* GREEN */
+        // Формируем составной ключ: Автор + " | " + Название
+        idxComposite[i].key = library[i].author + " | " + library[i].title;
+        idxComposite[i].recNum = i;
     }
     // Потом сортируем
     sortIndexInvNum();
     sortIndexTitle();
+    /* GREEN */
+    sortIndexComposite();
 }
 
 // 6. ПОИСК (Задание 2, п.9)
@@ -456,10 +548,182 @@ int binarySearchRecursiveTitle(const string& target) {
     return binarySearchRecursiveHelper(target, 0, bookCount - 1);
 }
 
+/* GREEN */
+// Функции поиска с выводом ВСЕХ совпадений при неуникальных ключах
+
+// Итерационный поиск по invNumber с выводом всех совпадений (хотя invNumber уникален)
+void binarySearchIterativeAll(unsigned int target) {
+    int left = 0;
+    int right = bookCount - 1;
+    bool found = false;
+    
+    // Сначала находим любое совпадение
+    int foundPos = -1;
+    while (left <= right) {
+        int mid = left + (right - left) / 2;
+        if (idxInv[mid].key == target) {
+            foundPos = mid;
+            break;
+        }
+        if (idxInv[mid].key < target) {
+            left = mid + 1;
+        } else {
+            right = mid - 1;
+        }
+    }
+    
+    if (foundPos == -1) {
+        cout << "Книга с таким инвентарным номером не найдена." << endl;
+        return;
+    }
+    
+    // Распространяемся влево и вправо для поиска всех совпадений
+    int start = foundPos, end = foundPos;
+    while (start > 0 && idxInv[start - 1].key == target) start--;
+    while (end < (int)bookCount - 1 && idxInv[end + 1].key == target) end++;
+    
+    cout << "Найдено записей: " << (end - start + 1) << endl;
+    for (int i = start; i <= end; i++) {
+        printBook(library[idxInv[i].recNum]);
+    }
+}
+
+// Рекурсивный поиск по названию с выводом всех совпадений
+void binarySearchRecursiveAllHelper(const string& target, int left, int right, vector<int>& results) {
+    if (left > right) return;
+    
+    int mid = left + (right - left) / 2;
+    int cmp = idxTitle[mid].key.compare(target);
+    
+    if (cmp == 0) {
+        // Нашли совпадение, добавляем и ищем слева и справа
+        results.push_back(idxTitle[mid].recNum);
+        
+        // Ищем слева
+        int l = mid - 1;
+        while (l >= left && idxTitle[l].key == target) {
+            results.push_back(idxTitle[l].recNum);
+            l--;
+        }
+        
+        // Ищем справа
+        int r = mid + 1;
+        while (r <= right && idxTitle[r].key == target) {
+            results.push_back(idxTitle[r].recNum);
+            r++;
+        }
+    } else if (cmp < 0) {
+        binarySearchRecursiveAllHelper(target, mid + 1, right, results);
+    } else {
+        binarySearchRecursiveAllHelper(target, left, mid - 1, results);
+    }
+}
+
+void binarySearchRecursiveTitleAll(const string& target) {
+    vector<int> results;
+    binarySearchRecursiveAllHelper(target, 0, bookCount - 1, results);
+    
+    if (results.empty()) {
+        cout << "Книга с таким названием не найдена." << endl;
+    } else {
+        cout << "Найдено записей: " << results.size() << endl;
+        for (size_t i = 0; i < results.size(); i++) {
+            printBook(library[results[i]]);
+        }
+    }
+}
+
+// Бинарный поиск по составному ключу (итерационный)
+int binarySearchComposite(const string& target) {
+    int left = 0;
+    int right = bookCount - 1;
+    
+    while (left <= right) {
+        int mid = left + (right - left) / 2;
+        int cmp = idxComposite[mid].key.compare(target);
+        
+        if (cmp == 0) {
+            return idxComposite[mid].recNum;
+        }
+        
+        if (cmp < 0) {
+            // Составной ключ отсортирован по убыванию, поэтому меняем направление
+            right = mid - 1;
+        } else {
+            left = mid + 1;
+        }
+    }
+    return -1;
+}
+
+// Поиск по составному ключу с выводом всех совпадений
+void binarySearchCompositeAll(const string& target) {
+    int left = 0;
+    int right = bookCount - 1;
+    bool found = false;
+    
+    int foundPos = -1;
+    while (left <= right) {
+        int mid = left + (right - left) / 2;
+        int cmp = idxComposite[mid].key.compare(target);
+        
+        if (cmp == 0) {
+            foundPos = mid;
+            break;
+        }
+        
+        if (cmp < 0) {
+            right = mid - 1;
+        } else {
+            left = mid + 1;
+        }
+    }
+    
+    if (foundPos == -1) {
+        cout << "Книга с таким составным ключом не найдена." << endl;
+        return;
+    }
+    
+    // Распространяемся влево и вправо для поиска всех совпадений
+    int start = foundPos, end = foundPos;
+    while (start > 0 && idxComposite[start - 1].key == target) start--;
+    while (end < (int)bookCount - 1 && idxComposite[end + 1].key == target) end++;
+    
+    cout << "Найдено записей: " << (end - start + 1) << endl;
+    for (int i = start; i <= end; i++) {
+        printBook(library[idxComposite[i].recNum]);
+    }
+}
+
+// Сравнение с std::binary_search из <algorithm>
+#include <algorithm>
+
+bool stdBinarySearchByInv(unsigned int target) {
+    // Создаем временный массив для сравнения
+    vector<unsigned int> keys(bookCount);
+    for (unsigned int i = 0; i < bookCount; i++) {
+        keys[i] = idxInv[i].key;
+    }
+    return std::binary_search(keys.begin(), keys.end(), target);
+}
+
+bool stdBinarySearchByTitle(const string& target) {
+    vector<string> keys(bookCount);
+    for (unsigned int i = 0; i < bookCount; i++) {
+        keys[i] = idxTitle[i].key;
+    }
+    return std::binary_search(keys.begin(), keys.end(), target);
+}
+
 void searchMenu() {
     cout << "\n--- ПОИСК ---" << endl;
     cout << "1. Поиск по инвентарному номеру (итерационный)" << endl;
     cout << "2. Поиск по названию (рекурсивный)" << endl;
+    /* GREEN */
+    cout << "3. Поиск по инвентарному номеру (все совпадения)" << endl;
+    cout << "4. Поиск по названию (все совпадения)" << endl;
+    cout << "5. Поиск по составному ключу (автор + название)" << endl;
+    cout << "6. Сравнение с std::binary_search" << endl;
     cout << "0. Назад" << endl;
     cout << "Выбор: ";
 
@@ -492,6 +756,50 @@ void searchMenu() {
         else {
             cout << "Книга с таким названием не найдена." << endl;
         }
+    }
+    /* GREEN */
+    else if (choice == 3) {
+        unsigned int inv;
+        cout << "Введите инвентарный номер: ";
+        cin >> inv;
+        binarySearchIterativeAll(inv);
+    }
+    else if (choice == 4) {
+        string title;
+        cin.ignore();
+        cout << "Введите название: ";
+        getline(cin, title);
+        binarySearchRecursiveTitleAll(title);
+    }
+    else if (choice == 5) {
+        string author, title;
+        cin.ignore();
+        cout << "Введите автора: ";
+        getline(cin, author);
+        cout << "Введите название: ";
+        getline(cin, title);
+        string compositeKey = author + " | " + title;
+        binarySearchCompositeAll(compositeKey);
+    }
+    else if (choice == 6) {
+        unsigned int inv;
+        string title;
+        cout << "Введите инвентарный номер для сравнения: ";
+        cin >> inv;
+        bool myResult = (binarySearchIterative(inv) != -1);
+        bool stdResult = stdBinarySearchByInv(inv);
+        cout << "Мой поиск: " << (myResult ? "найдено" : "не найдено") << endl;
+        cout << "std::binary_search: " << (stdResult ? "найдено" : "не найдено") << endl;
+        cout << "Результаты совпадают: " << (myResult == stdResult ? "ДА" : "НЕТ") << endl;
+        
+        cin.ignore();
+        cout << "Введите название для сравнения: ";
+        getline(cin, title);
+        myResult = (binarySearchRecursiveTitle(title) != -1);
+        stdResult = stdBinarySearchByTitle(title);
+        cout << "Мой поиск: " << (myResult ? "найдено" : "не найдено") << endl;
+        cout << "std::binary_search: " << (stdResult ? "найдено" : "не найдено") << endl;
+        cout << "Результаты совпадают: " << (myResult == stdResult ? "ДА" : "НЕТ") << endl;
     }
 }
 
@@ -558,6 +866,149 @@ void deleteBook() {
     }
 }
 
+/* GREEN */
+// Редактирование по названию (второй ключ)
+void editBookByTitle() {
+    cout << "\n--- РЕДАКТИРОВАНИЕ ПО НАЗВАНИЮ ---" << endl;
+    string title;
+    cin.ignore();
+    cout << "Введите название книги для редактирования: ";
+    getline(cin, title);
+
+    int idx = binarySearchRecursiveTitle(title);
+    if (idx == -1) {
+        cout << "Книга не найдена." << endl;
+        return;
+    }
+
+    cout << "Текущие данные:" << endl;
+    printBook(library[idx]);
+    cout << "Введите новые данные:" << endl;
+
+    cout << "Новый инвентарный номер: "; 
+    cin >> library[idx].invNumber;
+    cin.ignore();
+    cout << "Новое название: "; getline(cin, library[idx].title);
+    cout << "Новый автор: "; getline(cin, library[idx].author);
+    cout << "Новый статус (Доступна/Выдана): "; getline(cin, library[idx].status);
+
+    // После редактирования нужно перестроить индексы
+    rebuildIndices();
+    cout << "Данные обновлены. Индексы перестроены." << endl;
+}
+
+// Удаление по названию (второй ключ)
+void deleteBookByTitle() {
+    cout << "\n--- УДАЛЕНИЕ ПО НАЗВАНИЮ ---" << endl;
+    string title;
+    cin.ignore();
+    cout << "Введите название книги для удаления: ";
+    getline(cin, title);
+
+    int idx = binarySearchRecursiveTitle(title);
+    if (idx == -1) {
+        cout << "Книга не найдена." << endl;
+        return;
+    }
+
+    cout << "Удалить книгу: ";
+    printBook(library[idx]);
+    char confirm;
+    cout << "Вы уверены? (y/n): ";
+    cin >> confirm;
+
+    if (confirm == 'y' || confirm == 'Y') {
+        // Сдвигаем элементы массива влево
+        for (int i = idx; i < bookCount - 1; ++i) {
+            library[i] = library[i + 1];
+        }
+        bookCount--;
+
+        // Перестраиваем индексы
+        rebuildIndices();
+        cout << "Книга удалена." << endl;
+    }
+}
+
+// Вывод массива-индекса по инвентарному номеру (п.14)
+void printIndexByInvNum() {
+    if (bookCount == 0) {
+        cout << "Индекс пуст." << endl;
+        return;
+    }
+    cout << "\n=== ИНДЕКС ПО ИНВЕНТАРНОМУ НОМЕРУ (возрастание) ===" << endl;
+    cout << left << setw(6) << "Key" << " | " << setw(10) << "RecNum" << endl;
+    cout << string(20, '-') << endl;
+    for (unsigned int i = 0; i < bookCount; i++) {
+        cout << left << setw(6) << idxInv[i].key << " | " << setw(10) << idxInv[i].recNum << endl;
+    }
+}
+
+// Вывод массива-индекса по названию (п.14)
+void printIndexByTitle() {
+    if (bookCount == 0) {
+        cout << "Индекс пуст." << endl;
+        return;
+    }
+    cout << "\n=== ИНДЕКС ПО НАЗВАНИЮ (лексикографически) ===" << endl;
+    cout << left << setw(30) << "Key" << " | " << setw(10) << "RecNum" << endl;
+    cout << string(45, '-') << endl;
+    for (unsigned int i = 0; i < bookCount; i++) {
+        string shortKey = idxTitle[i].key.substr(0, 28);
+        cout << left << setw(30) << shortKey << " | " << setw(10) << idxTitle[i].recNum << endl;
+    }
+}
+
+// Вывод массива-индекса по составному ключу (факультативно)
+void printIndexByComposite() {
+    if (bookCount == 0) {
+        cout << "Индекс пуст." << endl;
+        return;
+    }
+    cout << "\n=== ИНДЕКС ПО СОСТАВНОМУ КЛЮЧУ (автор+название, убывание) ===" << endl;
+    cout << left << setw(40) << "Key" << " | " << setw(10) << "RecNum" << endl;
+    cout << string(55, '-') << endl;
+    for (unsigned int i = 0; i < bookCount; i++) {
+        string shortKey = idxComposite[i].key.substr(0, 38);
+        cout << left << setw(40) << shortKey << " | " << setw(10) << idxComposite[i].recNum << endl;
+    }
+}
+
+// Вывод отсортированного списка по составному ключу
+void printSortedByComposite() {
+    if (bookCount == 0) return;
+
+    cout << "\n=== ОТСТОРТИРОВАННЫЙ СПИСОК ПО СОСТАВНОМУ КЛЮЧУ (убывание) ===" << endl;
+    cout << left << setw(6) << "Inv#" << " | " << setw(25) << "Title" << " | " << setw(20) << "Author" << " | " << setw(6) << "Year" << " | " << setw(15) << "Status" << endl;
+    cout << string(80, '-') << endl;
+
+    for (unsigned int i = 0; i < bookCount; ++i) {
+        unsigned int realIndex = idxComposite[i].recNum;
+        printBook(library[realIndex]);
+    }
+}
+
+// Оптимизированная переиндексация после редактирования (факультативно)
+void updateIndicesAfterEdit(unsigned int editedIndex) {
+    // Обновляем только измененные записи в индексах
+    for (unsigned int i = 0; i < bookCount; i++) {
+        if (idxInv[i].recNum == editedIndex) {
+            idxInv[i].key = library[editedIndex].invNumber;
+        }
+        if (idxTitle[i].recNum == editedIndex) {
+            idxTitle[i].key = library[editedIndex].title;
+        }
+        if (idxComposite[i].recNum == editedIndex) {
+            idxComposite[i].key = library[editedIndex].author + " | " + library[editedIndex].title;
+        }
+    }
+    // Пересортировываем индексы (можно использовать более эффективную сортировку, 
+    // но для простоты используем полную пересортировку)
+    sortIndexInvNum();
+    sortIndexTitle();
+    sortIndexComposite();
+}
+
 // ГЛАВНОЕ МЕНЮ
 
 int main() {
@@ -574,9 +1025,14 @@ int main() {
         cout << "2. Ввести данные с клавиатуры" << endl;
         cout << "3. Показать все книги (как в памяти)" << endl;
         cout << "4. Показать отсортированные списки (Индексы)" << endl;
+        /* GREEN */
+        cout << "9. Показать индексы (массивы-индексы)" << endl;
+        cout << "10. Сортировка по составному ключу" << endl;
+        cout << "11. Редактировать по названию" << endl;
+        cout << "12. Удалить по названию" << endl;
         cout << "5. Поиск книг" << endl;
-        cout << "6. Редактировать запись" << endl;
-        cout << "7. Удалить запись" << endl;
+        cout << "6. Редактировать запись (по инв. номеру)" << endl;
+        cout << "7. Удалить запись (по инв. номеру)" << endl;
         cout << "8. Сохранить в файл" << endl;
         cout << "0. Выход" << endl;
         cout << "Выбор: ";
@@ -610,6 +1066,26 @@ int main() {
                 cout << "\n";
                 printSorted(1); // По названию
             }
+            break;
+        /* GREEN */
+        case 9:
+            if (bookCount == 0) {
+                cout << "Нет данных." << endl;
+            }
+            else {
+                printIndexByInvNum();
+                printIndexByTitle();
+                printIndexByComposite();
+            }
+            break;
+        case 10:
+            printSortedByComposite();
+            break;
+        case 11:
+            editBookByTitle();
+            break;
+        case 12:
+            deleteBookByTitle();
             break;
         case 5:
             searchMenu();
