@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="SR2Dronov/SR2Dronov.vcxproj" Id="b30f2131-c3ee-4c76-a404-c722db5ebdfc" />
+</Solution>
