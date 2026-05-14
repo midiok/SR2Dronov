@@ -22,8 +22,11 @@ using namespace std;
 
 /* GREEN */
 // Заглушки для Windows-специфичных функций (для кроссплатформенности)
-#ifndef _WIN32
+// Всегда определяем как заглушки, если они еще не определены
+#ifndef SetConsoleOutputCP
 #define SetConsoleOutputCP(x)
+#endif
+#ifndef SetConsoleCP
 #define SetConsoleCP(x)
 #endif
 
